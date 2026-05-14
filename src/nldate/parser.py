@@ -5,29 +5,57 @@ import re
 from datetime import date, timedelta
 
 MONTHS: dict[str, int] = {
-    "january": 1, "jan": 1,
-    "february": 2, "feb": 2,
-    "march": 3, "mar": 3,
-    "april": 4, "apr": 4,
+    "january": 1,
+    "jan": 1,
+    "february": 2,
+    "feb": 2,
+    "march": 3,
+    "mar": 3,
+    "april": 4,
+    "apr": 4,
     "may": 5,
-    "june": 6, "jun": 6,
-    "july": 7, "jul": 7,
-    "august": 8, "aug": 8,
-    "september": 9, "sep": 9, "sept": 9,
-    "october": 10, "oct": 10,
-    "november": 11, "nov": 11,
-    "december": 12, "dec": 12,
+    "june": 6,
+    "jun": 6,
+    "july": 7,
+    "jul": 7,
+    "august": 8,
+    "aug": 8,
+    "september": 9,
+    "sep": 9,
+    "sept": 9,
+    "october": 10,
+    "oct": 10,
+    "november": 11,
+    "nov": 11,
+    "december": 12,
+    "dec": 12,
 }
 
 WEEKDAYS: dict[str, int] = {
-    "monday": 0, "tuesday": 1, "wednesday": 2,
-    "thursday": 3, "friday": 4, "saturday": 5, "sunday": 6,
+    "monday": 0,
+    "tuesday": 1,
+    "wednesday": 2,
+    "thursday": 3,
+    "friday": 4,
+    "saturday": 5,
+    "sunday": 6,
 }
 
 WORD_NUMBERS: dict[str, int] = {
-    "a": 1, "an": 1, "one": 1, "two": 2, "three": 3,
-    "four": 4, "five": 5, "six": 6, "seven": 7, "eight": 8,
-    "nine": 9, "ten": 10, "eleven": 11, "twelve": 12,
+    "a": 1,
+    "an": 1,
+    "one": 1,
+    "two": 2,
+    "three": 3,
+    "four": 4,
+    "five": 5,
+    "six": 6,
+    "seven": 7,
+    "eight": 8,
+    "nine": 9,
+    "ten": 10,
+    "eleven": 11,
+    "twelve": 12,
 }
 
 
@@ -93,15 +121,34 @@ def _parse_anchor(s: str, today: date) -> date | None:
         return today + timedelta(days=1)
     if s == "yesterday":
         return today + timedelta(days=-1)
-    month_pat = "(" + "|".join(MONTHS) + ")"
-    m = re.fullmatch(
-        rf"{month_pat}\s+(\d{{1,2}})(?:st|nd|rd|th)?,?\s+(\d{{4}})", s
-    )
-    if m:
-        return date(int(m.group(3)), MONTHS[m.group(1)], int(m.group(2)))
+
+    # YYYY-MM-DD
     m = re.fullmatch(r"(\d{4})-(\d{2})-(\d{2})", s)
     if m:
         return date(int(m.group(1)), int(m.group(2)), int(m.group(3)))
+
+    # YYYY/MM/DD
+    m = re.fullmatch(r"(\d{4})/(\d{2})/(\d{2})", s)
+    if m:
+        return date(int(m.group(1)), int(m.group(2)), int(m.group(3)))
+
+    # MM/DD/YYYY
+    m = re.fullmatch(r"(\d{1,2})/(\d{1,2})/(\d{4})", s)
+    if m:
+        return date(int(m.group(3)), int(m.group(1)), int(m.group(2)))
+
+    # "December 1st, 2025"
+    month_pat = "(" + "|".join(MONTHS) + ")"
+    m = re.fullmatch(rf"{month_pat}\s+(\d{{1,2}})(?:st|nd|rd|th)?,?\s+(\d{{4}})", s)
+    if m:
+        return date(int(m.group(3)), MONTHS[m.group(1)], int(m.group(2)))
+
+    # "1st December 2025"
+    m = re.fullmatch(rf"(\d{{1,2}})(?:st|nd|rd|th)?\s+{month_pat}\s+(\d{{4}})", s)
+    if m:
+        return date(int(m.group(3)), MONTHS[m.group(2)], int(m.group(1)))
+
+    # next/last weekday
     m = re.fullmatch(r"(next|last)\s+(\w+)", s)
     if m:
         wd = WEEKDAYS.get(m.group(2))
@@ -109,6 +156,7 @@ def _parse_anchor(s: str, today: date) -> date | None:
             if m.group(1) == "next":
                 return _next_weekday(today, wd)
             return _last_weekday(today, wd)
+
     return None
 
 
@@ -118,12 +166,10 @@ def parse(s: str, today: date | None = None) -> date:
 
     s = re.sub(r"\s+", " ", s.strip().lower())
 
-    # Simple anchors
     anchor = _parse_anchor(s, today)
     if anchor is not None:
         return anchor
 
-    # next/last month/year
     if s == "next month":
         return _apply_offset(today, 1, "month", 1)
     if s == "last month":
@@ -153,7 +199,7 @@ def parse(s: str, today: date | None = None) -> date:
                 result = _apply_offset(result, amount, unit, -1)
             return result
 
-    # "N units before/after <anchor>"
+    # "N units before/after/from <anchor>"
     for kw, sign in [("before", -1), ("after", 1), ("from", 1)]:
         m = re.fullmatch(rf"(.+?)\s+{kw}\s+(.+)", s)
         if m:

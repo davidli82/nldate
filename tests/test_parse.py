@@ -4,7 +4,7 @@ import pytest
 
 from nldate import parse
 
-TODAY = date(2025, 6, 11) 
+TODAY = date(2025, 6, 11)
 
 
 def test_today() -> None:
