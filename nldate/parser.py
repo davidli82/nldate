@@ -1,0 +1,168 @@
+from __future__ import annotations
+
+import calendar
+import re
+from datetime import date, timedelta
+
+MONTHS: dict[str, int] = {
+    "january": 1, "jan": 1,
+    "february": 2, "feb": 2,
+    "march": 3, "mar": 3,
+    "april": 4, "apr": 4,
+    "may": 5,
+    "june": 6, "jun": 6,
+    "july": 7, "jul": 7,
+    "august": 8, "aug": 8,
+    "september": 9, "sep": 9, "sept": 9,
+    "october": 10, "oct": 10,
+    "november": 11, "nov": 11,
+    "december": 12, "dec": 12,
+}
+
+WEEKDAYS: dict[str, int] = {
+    "monday": 0, "tuesday": 1, "wednesday": 2,
+    "thursday": 3, "friday": 4, "saturday": 5, "sunday": 6,
+}
+
+WORD_NUMBERS: dict[str, int] = {
+    "a": 1, "an": 1, "one": 1, "two": 2, "three": 3,
+    "four": 4, "five": 5, "six": 6, "seven": 7, "eight": 8,
+    "nine": 9, "ten": 10, "eleven": 11, "twelve": 12,
+}
+
+
+def _parse_num(s: str) -> int | None:
+    if s.isdigit():
+        return int(s)
+    return WORD_NUMBERS.get(s)
+
+
+def _next_weekday(ref: date, wd: int) -> date:
+    days = wd - ref.weekday()
+    if days <= 0:
+        days += 7
+    return ref + timedelta(days=days)
+
+
+def _last_weekday(ref: date, wd: int) -> date:
+    days = ref.weekday() - wd
+    if days <= 0:
+        days += 7
+    return ref - timedelta(days=days)
+
+
+def _apply_offset(base: date, amount: int, unit: str, sign: int) -> date:
+    unit = unit.rstrip("s")
+    if unit == "day":
+        return base + timedelta(days=sign * amount)
+    if unit == "week":
+        return base + timedelta(weeks=sign * amount)
+    if unit == "month":
+        m = base.month + sign * amount
+        y = base.year + (m - 1) // 12
+        m = (m - 1) % 12 + 1
+        d = min(base.day, calendar.monthrange(y, m)[1])
+        return date(y, m, d)
+    if unit == "year":
+        try:
+            return base.replace(year=base.year + sign * amount)
+        except ValueError:
+            return base.replace(year=base.year + sign * amount, day=28)
+    raise ValueError(f"Unknown unit: {unit}")
+
+
+def _parse_offset_parts(s: str) -> list[tuple[int, str]] | None:
+    num_pat = r"(?:\d+|" + "|".join(WORD_NUMBERS) + r")"
+    unit_pat = r"(?:years?|months?|weeks?|days?)"
+    pairs = re.findall(rf"({num_pat})\s+({unit_pat})", s)
+    if not pairs:
+        return None
+    result = []
+    for n_str, unit in pairs:
+        n = _parse_num(n_str)
+        if n is None:
+            return None
+        result.append((n, unit))
+    return result
+
+
+def _parse_anchor(s: str, today: date) -> date | None:
+    if s == "today":
+        return today
+    if s == "tomorrow":
+        return today + timedelta(days=1)
+    if s == "yesterday":
+        return today + timedelta(days=-1)
+    month_pat = "(" + "|".join(MONTHS) + ")"
+    m = re.fullmatch(
+        rf"{month_pat}\s+(\d{{1,2}})(?:st|nd|rd|th)?,?\s+(\d{{4}})", s
+    )
+    if m:
+        return date(int(m.group(3)), MONTHS[m.group(1)], int(m.group(2)))
+    m = re.fullmatch(r"(\d{4})-(\d{2})-(\d{2})", s)
+    if m:
+        return date(int(m.group(1)), int(m.group(2)), int(m.group(3)))
+    m = re.fullmatch(r"(next|last)\s+(\w+)", s)
+    if m:
+        wd = WEEKDAYS.get(m.group(2))
+        if wd is not None:
+            if m.group(1) == "next":
+                return _next_weekday(today, wd)
+            return _last_weekday(today, wd)
+    return None
+
+
+def parse(s: str, today: date | None = None) -> date:
+    if today is None:
+        today = date.today()
+
+    s = re.sub(r"\s+", " ", s.strip().lower())
+
+    # Simple anchors
+    anchor = _parse_anchor(s, today)
+    if anchor is not None:
+        return anchor
+
+    # next/last month/year
+    if s == "next month":
+        return _apply_offset(today, 1, "month", 1)
+    if s == "last month":
+        return _apply_offset(today, 1, "month", -1)
+    if s == "next year":
+        return _apply_offset(today, 1, "year", 1)
+    if s == "last year":
+        return _apply_offset(today, 1, "year", -1)
+
+    # "in N units"
+    m = re.fullmatch(r"in\s+(.+)", s)
+    if m:
+        parts = _parse_offset_parts(m.group(1))
+        if parts:
+            result = today
+            for amount, unit in parts:
+                result = _apply_offset(result, amount, unit, 1)
+            return result
+
+    # "N units ago"
+    m = re.fullmatch(r"(.+?)\s+ago", s)
+    if m:
+        parts = _parse_offset_parts(m.group(1))
+        if parts:
+            result = today
+            for amount, unit in parts:
+                result = _apply_offset(result, amount, unit, -1)
+            return result
+
+    # "N units before/after <anchor>"
+    for kw, sign in [("before", -1), ("after", 1), ("from", 1)]:
+        m = re.fullmatch(rf"(.+?)\s+{kw}\s+(.+)", s)
+        if m:
+            parts = _parse_offset_parts(m.group(1))
+            anchor2 = _parse_anchor(m.group(2).strip(), today)
+            if parts and anchor2:
+                result = anchor2
+                for amount, unit in parts:
+                    result = _apply_offset(result, amount, unit, sign)
+                return result
+
+    raise ValueError(f"Cannot parse date string: {s!r}")
